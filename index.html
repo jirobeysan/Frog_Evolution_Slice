@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<link rel="icon" href="data:," />
+<title>カエル進化スライス</title>
+<!--
+  カエル進化スライス — EVOSUVAC（ボクセル生態系プロトタイプ）から切り出した
+  Game Off 2026 用の遊べる切片。単一HTMLファイル / 外部アセット・外部ライブラリなし。
+  仕組みは1つだけ：カエルの進化チェーン（脚力 → 長い舌 → ヌルヌル肌）。
+  公開リポジトリへはこのファイル1つをそのまま置けば動きます（file:// でも可）。
+-->
+<style>
+  :root{
+    --bg:#edf2e2; --panel:#fbfcf6; --panel-2:#f2f5e9;
+    --ink:#1d2b1e; --ink-soft:#4c5c4a; --line:#cfdabd;
+    --accent:#2e7d32; --accent-deep:#1b5e20; --accent-soft:#dceccb;
+    --pond:#0e7c7b; --warn:#b3261e; --gold:#8a6d1c;
+    --shadow:0 10px 28px rgba(27,60,30,.16);
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#131c15; --panel:#1d2a20; --panel-2:#243327;
+      --ink:#e6efdf; --ink-soft:#b3c4ab; --line:#3a4f3c;
+      --accent:#7cc47f; --accent-deep:#a5d6a7; --accent-soft:#2c4630;
+      --pond:#4db6ac; --warn:#ef9a9a; --gold:#d9bc6a;
+      --shadow:0 10px 28px rgba(0,0,0,.45);
+      color-scheme:dark;
+    }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;
+    line-height:1.6; -webkit-text-size-adjust:100%;
+  }
+  button{ font:inherit; min-height:44px; cursor:pointer; }
+  .wrap{ max-width:1020px; margin:0 auto; padding:14px 14px 40px; }
+
+  /* ---------- HUD ---------- */
+  .hud{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px;
+  }
+  .hud-cell{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:8px 12px 7px; min-width:0;
+  }
+  .hud-label{ font-size:.72rem; letter-spacing:.06em; color:var(--ink-soft); white-space:nowrap; }
+  .hud-value{ font-size:1.12rem; font-weight:700; line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hud-value small{ font-size:.78rem; font-weight:600; color:var(--ink-soft); }
+  .progress-row{ display:flex; align-items:center; gap:10px; margin:2px 2px 10px; }
+  .progress-track{ flex:1; height:10px; border-radius:99px; background:var(--panel-2); border:1px solid var(--line); overflow:hidden; }
+  .progress-fill{ height:100%; width:0%; background:var(--accent); border-radius:99px; transition:width .35s ease; }
+  .progress-text{ font-size:.8rem; color:var(--ink-soft); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .pips{ display:flex; gap:5px; }
+  .pip{ width:11px; height:11px; border-radius:50%; border:2px solid var(--accent); background:transparent; }
+  .pip.on{ background:var(--accent); }
+
+  /* ---------- Stage / canvas ---------- */
+  .stage-wrap{
+    position:relative; border-radius:14px; overflow:hidden;
+    box-shadow:var(--shadow); border:1px solid var(--line);
+    background:#79a85b; touch-action:none;
+  }
+  canvas{ display:block; width:100%; height:auto; }
+  .stage-wrap:focus-visible{ outline:3px solid var(--pond); outline-offset:2px; }
+
+  .banner{
+    position:absolute; left:50%; top:14px; transform:translateX(-50%) translateY(-6px);
+    background:rgba(20,32,20,.88); color:#f2f7ea; padding:8px 16px; border-radius:99px;
+    font-size:.92rem; font-weight:700; white-space:nowrap; max-width:94%;
+    overflow:hidden; text-overflow:ellipsis;
+    opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+  }
+  .banner.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .banner.bad{ background:rgba(122,26,20,.92); }
+  .banner.good{ background:rgba(23,84,32,.92); }
+
+  /* ---------- Overlay (title / evolution / clear) ---------- */
+  .overlay{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(16,28,18,.58); padding:16px; z-index:5;
+  }
+  .overlay.show{ display:flex; }
+  .overlay-card{
+    background:var(--panel); color:var(--ink); border-radius:16px; border:1px solid var(--line);
+    max-width:560px; width:100%; padding:26px 28px 24px; text-align:center;
+    box-shadow:var(--shadow); max-height:100%; overflow:auto;
+  }
+  .overlay-card .kicker{ font-size:.78rem; letter-spacing:.14em; color:var(--pond); font-weight:700; margin:0 0 4px; }
+  .overlay-card h1,.overlay-card h2{
+    font-family:"Hiragino Maru Gothic ProN","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+    margin:0 0 8px; line-height:1.3;
+  }
+  .overlay-card h1{ font-size:1.9rem; }
+  .overlay-card h2{ font-size:1.55rem; }
+  .overlay-card p{ margin:6px 0; color:var(--ink-soft); font-size:.95rem; }
+  .overlay-card p.shift-line{
+    color:var(--ink); font-weight:700; font-size:1.02rem;
+    border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    padding:9px 4px; margin:12px 0;
+  }
+  .overlay-card .howto{ text-align:left; font-size:.9rem; margin:10px auto 4px; max-width:430px; color:var(--ink); }
+  .overlay-card .howto li{ margin:3px 0; }
+  .result-grid{ display:flex; gap:8px; justify-content:center; margin:14px 0 4px; flex-wrap:wrap; }
+  .result-cell{ background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:8px 16px; min-width:118px; }
+  .result-cell .r-label{ font-size:.72rem; color:var(--ink-soft); letter-spacing:.06em; }
+  .result-cell .r-value{ font-size:1.3rem; font-weight:800; font-variant-numeric:tabular-nums; }
+  .btn-primary{
+    background:var(--accent); color:#fff; border:none; border-radius:10px;
+    padding:12px 34px; font-size:1.05rem; font-weight:800; margin-top:14px; min-height:50px;
+  }
+  @media (prefers-color-scheme: dark){ .btn-primary{ color:#10240f; } }
+  .btn-primary:hover{ background:var(--accent-deep); }
+  .btn-primary:focus-visible,.btn-ghost:focus-visible{ outline:3px solid var(--pond); outline-offset:2px; }
+
+  /* ---------- Controls row ---------- */
+  .controls-row{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .btn-ghost{
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    border-radius:9px; padding:8px 16px; font-size:.88rem; font-weight:600;
+  }
+  .btn-ghost:hover{ border-color:var(--accent); }
+  .controls-note{ font-size:.82rem; color:var(--ink-soft); margin-left:auto; }
+
+  /* ---------- Guide sections ---------- */
+  .guide{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:22px; }
+  .guide section{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .guide h2{ font-size:1.02rem; margin:0 0 10px; padding-bottom:7px; border-bottom:2px solid var(--accent-soft); }
+  .chain{ list-style:none; margin:0; padding:0; }
+  .chain li{ display:flex; gap:11px; padding:8px 0; border-bottom:1px dashed var(--line); align-items:flex-start; }
+  .chain li:last-child{ border-bottom:none; }
+  .chain .dot{
+    flex:none; width:34px; height:34px; border-radius:50%; margin-top:2px;
+    border:2px solid rgba(0,0,0,.14); position:relative;
+  }
+  .chain .dot::after{ /* frog eyes */
+    content:""; position:absolute; left:6px; top:5px; width:5px; height:5px; border-radius:50%;
+    background:#20301e; box-shadow:13px 0 0 #20301e;
+  }
+  .chain b{ display:block; font-size:.95rem; }
+  .chain span{ font-size:.84rem; color:var(--ink-soft); display:block; }
+  .chain .need{ margin-left:auto; flex:none; font-size:.8rem; font-weight:700; color:var(--accent-deep); white-space:nowrap; padding-top:4px; }
+  .prey-list{ list-style:none; margin:0; padding:0; font-size:.9rem; }
+  .prey-list li{ padding:6px 0; border-bottom:1px dashed var(--line); display:flex; gap:9px; align-items:baseline; }
+  .prey-list li:last-child{ border-bottom:none; }
+  .prey-list b{ white-space:nowrap; }
+  .prey-list span{ color:var(--ink-soft); font-size:.84rem; }
+  .rules{ font-size:.9rem; margin:0; padding-left:1.15em; }
+  .rules li{ margin:5px 0; }
+  footer{ margin-top:20px; font-size:.78rem; color:var(--ink-soft); text-align:center; }
+
+  @media (max-width:640px){
+    .wrap{ padding:10px 10px 30px; }
+    .hud{ grid-template-columns:repeat(2,1fr); }
+    .hud-value{ font-size:1.02rem; }
+    .guide{ grid-template-columns:1fr; }
+    /* キャンバスはモバイルでは低くなるので、オーバーレイは画面全体に出して
+       スタートボタンまで必ず届くようにする */
+    .overlay{ position:fixed; inset:0; z-index:60; padding:12px; overflow-y:auto; }
+    .overlay-card{ padding:20px 18px; margin:auto; max-height:none; overflow:visible; }
+    .overlay-card h1{ font-size:1.5rem; }
+    .overlay-card p{ font-size:.9rem; }
+    .overlay-card .howto{ font-size:.86rem; }
+    .controls-note{ margin-left:0; width:100%; }
+    .banner{ font-size:.82rem; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .progress-fill,.banner{ transition:none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HUD -->
+  <div class="hud" role="status" aria-live="off">
+    <div class="hud-cell">
+      <div class="hud-label">現在の段階</div>
+      <div class="hud-value" id="hudStage">小さなカエル</div>
+    </div>
+    <div class="hud-cell">
+      <div class="hud-label">食べた数（合計）</div>
+      <div class="hud-value"><span id="hudEaten">0</span> <small>/ 30 匹</small></div>
+    </div>
+    <div class="hud-cell">
+      <div class="hud-label" id="hudNextLabel">次の進化まで</div>
+      <div class="hud-value">あと <span id="hudNext">7</span> <small>匹</small></div>
+    </div>
+    <div class="hud-cell">
+      <div class="hud-label">経過時間</div>
+      <div class="hud-value" id="hudTime" style="font-variant-numeric:tabular-nums;">0:00</div>
+    </div>
+  </div>
+  <div class="progress-row">
+    <div class="pips" aria-hidden="true">
+      <span class="pip" id="pip0"></span><span class="pip" id="pip1"></span><span class="pip" id="pip2"></span><span class="pip" id="pip3"></span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">進化 0 / 3</div>
+  </div>
+
+  <!-- Game stage -->
+  <div class="stage-wrap" id="stageWrap" tabindex="0" aria-label="ゲーム画面。WASDキーか矢印キー、またはタップとドラッグでカエルを動かします。">
+    <canvas id="game" width="960" height="620"></canvas>
+    <div class="banner" id="banner"></div>
+
+    <!-- Title -->
+    <div class="overlay show" id="titleOverlay">
+      <div class="overlay-card">
+        <p class="kicker">EVOSUVAC 切片 ／ GAME OFF 2026</p>
+        <h1>カエル進化スライス</h1>
+        <p class="shift-line">SHIFT ＝ 姿の変化。食べて、変わって、池の頂点へ。</p>
+        <p>池と草原の小さなアリーナで獲物を食べ続けると、カエルは3回進化します。脚が速くなり、舌が伸び、最後はヌルヌルの肌に。大きくて長い2匹のヘビに捕まると、その段階で食べた数がリセットされます。最終形態では捕まりませんが、当たると弾き飛ばされます。</p>
+        <ul class="howto">
+          <li><b>移動だけ</b>： WASD／矢印キー、スマホはタップ＆ドラッグ</li>
+          <li><b>画面端は通り抜け</b>：カエルも端を越えて反対側から出てきます。追い詰めた獲物を逃がしません</li>
+          <li><b>捕食は自動</b>：獲物に触れるだけ。進化すると舌が勝手に伸びます</li>
+          <li><b>目標</b>：合計30匹食べて最終形態になり、オニヤンマを仕留める</li>
+        </ul>
+        <button class="btn-primary" id="startBtn" type="button">ゲームスタート</button>
+      </div>
+    </div>
+
+    <!-- Evolution -->
+    <div class="overlay" id="evoOverlay">
+      <div class="overlay-card">
+        <p class="kicker">SHIFT — 進化</p>
+        <h2 id="evoTitle">脚力カエルに進化！</h2>
+        <p id="evoDesc"></p>
+      </div>
+    </div>
+
+    <!-- Clear -->
+    <div class="overlay" id="clearOverlay">
+      <div class="overlay-card">
+        <p class="kicker">CLEAR</p>
+        <h2>池の頂点に到達</h2>
+        <p>ヌルヌルの最終形態でオニヤンマを仕留めた。ヘビに捕まることはもうない——当たれば弾かれるだけだ。</p>
+        <div class="result-grid">
+          <div class="result-cell"><div class="r-label">所要時間</div><div class="r-value" id="clearTime">0:00</div></div>
+          <div class="result-cell"><div class="r-label">食べた総数</div><div class="r-value"><span id="clearEaten">30</span> 匹</div></div>
+          <div class="result-cell"><div class="r-label">ヘビに捕まった</div><div class="r-value"><span id="clearCaught">0</span> 回</div></div>
+        </div>
+        <button class="btn-primary" id="againBtn" type="button">もう一度遊ぶ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls-row">
+    <button class="btn-ghost" id="pauseBtn" type="button">一時停止</button>
+    <button class="btn-ghost" id="resetBtn" type="button">はじめから</button>
+    <button class="btn-ghost" id="soundBtn" type="button">音：オン</button>
+    <span class="controls-note">移動：WASD／矢印キー、タップ＆ドラッグ　／　一時停止：P または Esc</span>
+  </div>
+
+  <!-- Guides -->
+  <div class="guide">
+    <section aria-labelledby="chainH">
+      <h2 id="chainH">進化チェーン（これだけ）</h2>
+      <ol class="chain">
+        <li>
+          <span class="dot" style="background:#9ccc65;"></span>
+          <div><b>小さなカエル</b><span>まずはコバエを追いかけて食べる。脚も舌も、まだ普通。</span></div>
+          <span class="need">7匹で進化</span>
+        </li>
+        <li>
+          <span class="dot" style="background:#7cb342;"></span>
+          <div><b>脚力カエル</b><span>移動が速くなり、ピョンピョン跳ねて進むホップ移動に。逃げるバッタに追いつける。</span></div>
+          <span class="need">9匹で進化</span>
+        </li>
+        <li>
+          <span class="dot" style="background:#558b2f;"></span>
+          <div><b>長舌カエル</b><span>舌が届く範囲（うっすら見える輪）に入った獲物を、自動で舌で捕る。速いトンボも届く。</span></div>
+          <span class="need">11匹で進化</span>
+        </li>
+        <li>
+          <span class="dot" style="background:#26a69a;"></span>
+          <div><b>ヌルヌルカエル（最終形態）</b><span>全身が光るヌルヌル肌。ヘビに捕まることはないが、当たると弾き飛ばされて操作が利きにくくなる。仕上げにオニヤンマを3匹。</span></div>
+          <span class="need">頂点まで3匹</span>
+        </li>
+      </ol>
+    </section>
+    <section aria-labelledby="ruleH">
+      <h2 id="ruleH">アリーナのルール</h2>
+      <ul class="prey-list">
+        <li><b>コバエ</b><span>ゆっくり漂う最初の獲物</span></li>
+        <li><b>バッタ</b><span>近づくと跳ねて逃げる</span></li>
+        <li><b>トンボ</b><span>池の上を速く飛び回る</span></li>
+        <li><b>オニヤンマ</b><span>最終形態の相手。最速で逃げ回る</span></li>
+        <li><b>ヘビ（天敵）×2匹</b><span>大きくて長い2匹が別ルートでアリーナを巡回中。最終形態になる前に捕まると、その段階で食べた数がリセットされ、池のほとりからやり直し</span></li>
+      </ul>
+      <ul class="rules">
+        <li>攻撃ボタンはありません。移動だけで遊びます。</li>
+        <li>カエルも昆虫も画面端で止まらず、端を抜けて反対側から現れます。端に溜まらず、端まで追い詰めた獲物もそのまま追いかけて捕まえられます。</li>
+        <li>1プレイは合計30匹・3〜5分が目安です。</li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>EVOSUVAC（ボクセル生態系プロトタイプ）の Game Off 2026 用切片 ／ 単一HTMLファイル・外部アセットなし</footer>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   カエル進化スライス
+   構成: 定数 → 状態 → 入力 → 音 → 生成 → 更新 → 描画 → ループ
+   ============================================================ */
+
+/* ---------- 定数 ---------- */
+var W = 960, H = 620;
+var MARGIN = 34; /* アリーナの壁 */
+
+/* 進化段階。need は「その段階で食べる数」。累計: 7 / 16 / 27 / 30 */
+var STAGES = [
+  { name:"小さなカエル",       speed:178, radius:17, tongue:0,   need:7,
+    evoDesc:"" },
+  { name:"脚力カエル",         speed:238, radius:20, tongue:0,   need:9,
+    evoDesc:"脚力がついた。移動が速くなり、ピョンピョン跳ねて進める。逃げるバッタにも追いつける。" },
+  { name:"長舌カエル",         speed:248, radius:23, tongue:158, need:11,
+    evoDesc:"舌が長く伸びた。輪の範囲に入った獲物を、舌が自動で捕まえる。速いトンボも届く。" },
+  { name:"ヌルヌルカエル",     speed:262, radius:26, tongue:172, need:3,
+    evoDesc:"最終形態。全身ヌルヌルの肌で、ヘビに捕まることはない。ただし当たると弾き飛ばされるので、近づきすぎは禁物。仕上げにオニヤンマを3匹仕留めよう。" }
+];
+var CUM_BEFORE = [0, 7, 16, 27];
+var TOTAL_GOAL = 30;
+
+/* 獲物の種類 */
+var PREY_TYPES = {
+  kobae:    { label:"コバエ",    radius:8,  speed:36 },
+  batta:    { label:"バッタ",    radius:11, speed:52 },
+  tonbo:    { label:"トンボ",    radius:12, speed:118 },
+  oniyanma: { label:"オニヤンマ", radius:16, speed:158 }
+};
+
+/* ヘビの巡回路（池と草原を横切るループ）。2匹は別ルートで巡回する */
+var SNAKE_PATH = [
+  [150,105],[470,78],[822,120],[862,320],[655,520],[330,556],
+  [96,392],[268,272],[560,300],[800,205]
+];
+var SNAKE_PATH_2 = [
+  [815,515],[480,548],[140,500],[85,210],[300,95],[610,105],
+  [875,240],[700,390],[420,330],[180,300]
+];
+function makeSnake(path, startIdx){
+  return {
+    path:path,
+    x:path[startIdx][0], y:path[startIdx][1],
+    wp:(startIdx + 1) % path.length,
+    trail:[], slipT:0, slipX:0, slipY:0
+  };
+}
+
+/* ---------- 状態 ---------- */
+var canvas = document.getElementById("game");
+var ctx = canvas.getContext("2d");
+var state = null;
+
+function newState(){
+  return {
+    mode:"title",           /* title | playing | evo | clear */
+    paused:false,
+    stage:0,
+    stageEaten:0,
+    caughtCount:0,
+    elapsed:0,
+    frog:{ x:W*0.62, y:H*0.66, vx:0, vy:0, face:1, hop:0, inv:0, tongueT:0, tongueTarget:null, tongueCd:0, kbX:0, kbY:0, kbT:0 },
+    prey:[],
+    snakes:[ makeSnake(SNAKE_PATH, 0), makeSnake(SNAKE_PATH_2, 0) ],
+    particles:[],
+    floats:[],
+    shake:0,
+    evoT:0,
+    time:0
+  };
+}
+state = newState();
+
+function totalEaten(){ return CUM_BEFORE[state.stage] + state.stageEaten; }
+
+/* ---------- 乱数ヘルパー ---------- */
+function rand(a,b){ return a + Math.random()*(b-a); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function dist(x1,y1,x2,y2){ var dx=x2-x1, dy=y2-y1; return Math.sqrt(dx*dx+dy*dy); }
+/* 画面端シームレス用の距離・差分：端を挟んで近いものは近いとして扱う */
+function wrapDelta(d, span){ if(d > span/2) return d - span; if(d < -span/2) return d + span; return d; }
+function torusDist(x1,y1,x2,y2){
+  var spanX = W - MARGIN*2, spanY = H - MARGIN*2;
+  var dx = wrapDelta(x2-x1, spanX), dy = wrapDelta(y2-y1, spanY);
+  return Math.sqrt(dx*dx+dy*dy);
+}
+function wrapPos(o){
+  var spanX = W - MARGIN*2, spanY = H - MARGIN*2;
+  if(o.x < MARGIN) o.x += spanX; else if(o.x >= W - MARGIN) o.x -= spanX;
+  if(o.y < MARGIN) o.y += spanY; else if(o.y >= H - MARGIN) o.y -= spanY;
+}
+
+/* ---------- 音（Web Audio合成のみ） ---------- */
+var audioCtx = null, soundOn = true;
+function beep(freq, dur, type, vol, when){
+  if(!soundOn) return;
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state === "suspended") audioCtx.resume();
+    var t = audioCtx.currentTime + (when||0);
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type||"sine"; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol||0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }catch(e){ /* 音が出なくてもゲームは続行 */ }
+}
+function sndEat(){ beep(660,0.09,"sine",0.10); beep(990,0.08,"sine",0.07,0.05); }
+function sndTongue(){ beep(300,0.07,"square",0.05); }
+function sndEvo(){ [523,659,784,1046].forEach(function(f,i){ beep(f,0.16,"triangle",0.11,i*0.09); }); }
+function sndCaught(){ beep(220,0.25,"sawtooth",0.10); beep(147,0.35,"sawtooth",0.10,0.12); }
+function sndSlip(){ beep(900,0.18,"sine",0.09); if(audioCtx){} beep(1400,0.14,"sine",0.06,0.08); }
+function sndClear(){ [523,659,784,1046,1318].forEach(function(f,i){ beep(f,0.22,"triangle",0.11,i*0.11); }); }
+
+/* ---------- 入力 ---------- */
+var keys = {};
+var pointer = { active:false, x:0, y:0, anchorX:0, anchorY:0, frogX:0, frogY:0 };
+window.addEventListener("keydown", function(e){
+  var k = e.key.toLowerCase();
+  if(["arrowup","arrowdown","arrowleft","arrowright"," "].indexOf(k) >= 0) e.preventDefault();
+  if(k === "p" || k === "escape"){ togglePause(); return; }
+  keys[k] = true; keys[e.key] = true;
+});
+window.addEventListener("keyup", function(e){ keys[e.key.toLowerCase()] = false; keys[e.key] = false; });
+
+function canvasPos(e){
+  var r = canvas.getBoundingClientRect();
+  return { x:(e.clientX - r.left) * W / r.width, y:(e.clientY - r.top) * H / r.height };
+}
+canvas.addEventListener("pointerdown", function(e){
+  var p = canvasPos(e);
+  pointer.active = true; pointer.x = p.x; pointer.y = p.y;
+  /* タップのたびに「タップした位置」と「その時点のカエルの位置」をセットで覚え直す。
+     覚え直さないと、端を越えた直後の再タップでカエルが端回りの最短方向へ逆走してしまう */
+  pointer.anchorX = p.x; pointer.anchorY = p.y;
+  pointer.frogX = state.frog.x; pointer.frogY = state.frog.y;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", function(e){
+  if(!pointer.active) return;
+  var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y;
+});
+function pointerOff(){ pointer.active = false; }
+canvas.addEventListener("pointerup", pointerOff);
+canvas.addEventListener("pointercancel", pointerOff);
+
+/* ---------- バナー ---------- */
+var bannerEl = document.getElementById("banner"), bannerTimer = null;
+function showBanner(text, kind){
+  bannerEl.textContent = text;
+  bannerEl.className = "banner show" + (kind ? " " + kind : "");
+  if(bannerTimer) clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(function(){ bannerEl.className = "banner"; }, 2400);
+}
+
+/* ---------- 獲物の生成 ---------- */
+function preyTypeForStage(){
+  var s = state.stage, r = Math.random();
+  if(s === 0) return "kobae";
+  if(s === 1) return r < 0.72 ? "batta" : "kobae";
+  if(s === 2) return r < 0.8 ? "tonbo" : "batta";
+  return "oniyanma";
+}
+function preyTargetCount(){
+  return [5,5,4,2][state.stage];
+}
+function spawnPrey(){
+  var type = preyTypeForStage();
+  var def = PREY_TYPES[type];
+  var x, y, tries = 0;
+  do{
+    x = rand(MARGIN+30, W-MARGIN-30);
+    y = rand(MARGIN+30, H-MARGIN-30);
+    tries++;
+  }while(tries < 12 && (dist(x,y,state.frog.x,state.frog.y) < 130 || state.snakes.some(function(s){ return dist(x,y,s.x,s.y) < 120; })));
+  state.prey.push({
+    type:type, x:x, y:y, vx:rand(-1,1), vy:rand(-1,1),
+    r:def.radius, speed:def.speed,
+    wander:rand(0,Math.PI*2), hopT:rand(0.4,1.4), flap:rand(0,Math.PI*2), dartT:rand(0.5,1.2)
+  });
+}
+function ensurePrey(){ while(state.prey.length < preyTargetCount()) spawnPrey(); }
+
+/* ---------- 演出 ---------- */
+function burst(x, y, color, n){
+  for(var i=0;i<n;i++){
+    var a = Math.random()*Math.PI*2, sp = rand(40,170);
+    state.particles.push({ x:x, y:y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-30, life:rand(0.35,0.7), t:0, color:color, r:rand(2,4.5) });
+  }
+}
+function floatText(x, y, text, color){
+  state.floats.push({ x:x, y:y, text:text, color:color||"#ffffff", t:0 });
+}
+
+/* ---------- ゲーム進行 ---------- */
+function startGame(){
+  state = newState();
+  state.mode = "playing";
+  state.frog.inv = 1.2;
+  ensurePrey();
+  document.getElementById("titleOverlay").classList.remove("show");
+  document.getElementById("clearOverlay").classList.remove("show");
+  document.getElementById("evoOverlay").classList.remove("show");
+  document.getElementById("pauseBtn").textContent = "一時停止";
+  syncHUD();
+  showBanner("コバエを7匹食べて進化しよう");
+  document.getElementById("stageWrap").focus();
+}
+function togglePause(){
+  if(state.mode !== "playing") return;
+  state.paused = !state.paused;
+  document.getElementById("pauseBtn").textContent = state.paused ? "再開する" : "一時停止";
+  if(state.paused) showBanner("一時停止中");
+}
+
+function eatPrey(p){
+  state.prey.splice(state.prey.indexOf(p), 1);
+  state.stageEaten++;
+  burst(p.x, p.y, "#fff59d", 10);
+  floatText(p.x, p.y - 14, "+1", "#ffffff");
+  sndEat();
+  if(state.stageEaten >= STAGES[state.stage].need){
+    if(state.stage >= 3){ clearGame(); }
+    else { evolve(); }
+  }
+  ensurePrey();
+  syncHUD();
+}
+
+function evolve(){
+  state.stage++;
+  state.stageEaten = 0;
+  state.mode = "evo";
+  state.evoT = 2.4;
+  state.frog.inv = Math.max(state.frog.inv, 2.6);
+  var st = STAGES[state.stage];
+  document.getElementById("evoTitle").textContent = st.name + "に進化！";
+  document.getElementById("evoDesc").textContent = st.evoDesc;
+  document.getElementById("evoOverlay").classList.add("show");
+  burst(state.frog.x, state.frog.y, "#c5e1a5", 30);
+  sndEvo();
+  syncHUD();
+}
+
+function caught(){
+  state.caughtCount++;
+  state.stageEaten = 0;
+  state.shake = 0.45;
+  state.frog.x = W*0.62; state.frog.y = H*0.66;
+  state.frog.vx = 0; state.frog.vy = 0;
+  state.frog.kbX = 0; state.frog.kbY = 0; state.frog.kbT = 0;
+  state.frog.inv = 3;
+  /* カエルが移動したので、ドラッグ中なら基準点を付け直す（古い基準点のままだと逆方向へ引っ張られる） */
+  if(pointer.active){
+    pointer.anchorX = pointer.x; pointer.anchorY = pointer.y;
+    pointer.frogX = state.frog.x; pointer.frogY = state.frog.y;
+  }
+  state.snakes.forEach(function(s){ s.wp = 0; });
+  showBanner("ヘビに捕まった！この段階で食べた数がリセット", "bad");
+  sndCaught();
+  syncHUD();
+}
+
+function slip(s){
+  s.slipT = 1.1;
+  /* ヘビが滑ってカエルから離れる方向へ吹き飛ぶ */
+  var dx = s.x - state.frog.x, dy = s.y - state.frog.y, d = Math.max(1, Math.sqrt(dx*dx+dy*dy));
+  s.slipX = dx/d * 320; s.slipY = dy/d * 320;
+  /* カエル側も無反応にしない：捕まりはしないが、ヘビの反対方向へ弾き飛ばされる。
+     リセットはない代わりに、位置と操作の主導権を失うのでヘビの脅威は残る */
+  var f = state.frog;
+  f.kbX = -dx/d * 560; f.kbY = -dy/d * 560; f.kbT = 0.38;
+  /* ドラッグ中なら基準点を付け直す（弾かれた先で古い基準点のままだと逆方向へ引っ張られる） */
+  if(pointer.active){
+    pointer.anchorX = pointer.x; pointer.anchorY = pointer.y;
+    pointer.frogX = f.x; pointer.frogY = f.y;
+  }
+  state.shake = Math.max(state.shake, 0.2);
+  burst(f.x, f.y, "#b2dfdb", 10);
+  state.frog.inv = Math.max(state.frog.inv, 1.4);
+  floatText(state.frog.x, state.frog.y - 34, "ヌルッ！弾かれた", "#b2dfdb");
+  showBanner("ヌルヌル肌で捕まらなかったが、弾き飛ばされた！", "good");
+  sndSlip();
+  beep(180, 0.16, "sine", 0.10); /* 弾かれた鈍い音 */
+}
+
+function clearGame(){
+  state.mode = "clear";
+  document.getElementById("clearTime").textContent = fmtTime(state.elapsed);
+  document.getElementById("clearEaten").textContent = TOTAL_GOAL;
+  document.getElementById("clearCaught").textContent = state.caughtCount;
+  document.getElementById("clearOverlay").classList.add("show");
+  burst(state.frog.x, state.frog.y, "#ffe082", 40);
+  sndClear();
+  syncHUD();
+}
+
+/* ---------- HUD ---------- */
+function fmtTime(sec){
+  var m = Math.floor(sec/60), s = Math.floor(sec%60);
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+function syncHUD(){
+  document.getElementById("hudStage").textContent = STAGES[state.stage].name;
+  document.getElementById("hudEaten").textContent = totalEaten();
+  var isFinal = state.stage >= 3;
+  document.getElementById("hudNextLabel").textContent = isFinal ? "頂点まで（オニヤンマ）" : "次の進化まで";
+  document.getElementById("hudNext").textContent = Math.max(0, STAGES[state.stage].need - state.stageEaten);
+  document.getElementById("progressFill").style.width = (totalEaten()/TOTAL_GOAL*100) + "%";
+  document.getElementById("progressText").textContent = "進化 " + state.stage + " / 3";
+  for(var i=0;i<4;i++) document.getElementById("pip"+i).className = "pip" + (i <= state.stage ? " on" : "");
+}
+
+/* ---------- 更新 ---------- */
+function update(dt){
+  state.time += dt;
+  if(state.mode === "evo"){
+    state.evoT -= dt;
+    if(state.evoT <= 0){
+      state.mode = "playing";
+      document.getElementById("evoOverlay").classList.remove("show");
+    }
+    updateParticles(dt);
+    return;
+  }
+  if(state.mode !== "playing" || state.paused) { updateParticles(dt); return; }
+
+  state.elapsed += dt;
+  document.getElementById("hudTime").textContent = fmtTime(state.elapsed);
+
+  var f = state.frog, st = STAGES[state.stage];
+
+  /* --- 移動入力 --- */
+  var mx = 0, my = 0;
+  if(keys["w"] || keys["arrowup"]) my -= 1;
+  if(keys["s"] || keys["arrowdown"]) my += 1;
+  if(keys["a"] || keys["arrowleft"]) mx -= 1;
+  if(keys["d"] || keys["arrowright"]) mx += 1;
+  if(pointer.active){
+    /* 相対ドラッグ：目標位置 = タップ時のカエルの位置 + 指の移動量。
+       タップしただけではカエルは動かず、指を動かした分だけ付いてくる。
+       目標との差は端を挟んで計算するので、ドラッグの途中でカエルが端を越えても方向は反転しない */
+    var spanXp = W - MARGIN*2, spanYp = H - MARGIN*2;
+    var txp = pointer.frogX + (pointer.x - pointer.anchorX);
+    var typ = pointer.frogY + (pointer.y - pointer.anchorY);
+    var pdx = wrapDelta(txp - f.x, spanXp), pdy = wrapDelta(typ - f.y, spanYp), pd = Math.sqrt(pdx*pdx+pdy*pdy);
+    if(pd > 14){ mx = pdx/pd; my = pdy/pd; }
+    else { mx = 0; my = 0; }
+  }
+  var mag = Math.sqrt(mx*mx+my*my);
+  if(mag > 1){ mx/=mag; my/=mag; }
+
+  /* 脚力以降はホップ移動：速度が波打つ */
+  var speedF = 1;
+  if(state.stage >= 1 && mag > 0){
+    f.hop += dt * 9;
+    speedF = 0.62 + 0.58 * Math.max(0, Math.sin(f.hop));
+  } else if(mag > 0){ f.hop += dt * 6; }
+
+  var kbDamp = f.kbT > 0 ? 0.25 : 1; /* ヘビに弾かれている間は操作が利きにくい */
+  f.vx = mx * st.speed * speedF * kbDamp;
+  f.vy = my * st.speed * speedF * kbDamp;
+  /* カエルも画面端はシームレス：獲物と同じく端を越えたら反対側から現れる。
+     以前はここが clamp で止まっていたため、端に追い詰めた獲物がワープすると取り逃がしていた */
+  f.x += f.vx*dt; f.y += f.vy*dt;
+  wrapPos(f);
+  /* ヘビに弾かれた勢い（最終形態で接触したとき）。減衰しながら滑り、
+     ドラッグの基準点も一緒にずらして逆方向へ引っ張られないようにする */
+  if(f.kbT > 0){
+    f.kbT -= dt;
+    var kbDx = f.kbX * dt, kbDy = f.kbY * dt;
+    f.x += kbDx; f.y += kbDy;
+    if(pointer.active){ pointer.frogX += kbDx; pointer.frogY += kbDy; }
+    var kbDecay = Math.pow(0.002, dt);
+    f.kbX *= kbDecay; f.kbY *= kbDecay;
+    wrapPos(f);
+  }
+  if(mx !== 0) f.face = mx > 0 ? 1 : -1;
+  if(f.inv > 0) f.inv -= dt;
+
+  /* --- 舌（長舌以降は自動） --- */
+  if(f.tongueCd > 0) f.tongueCd -= dt;
+  if(f.tongueT > 0){
+    f.tongueT -= dt;
+    if(f.tongueT <= 0){
+      /* ターゲットは舌が届くこの瞬間まで保持する。
+         以前は発射中の毎フレームで null に戻していたため、届く前に捕食がキャンセルされていた */
+      if(f.tongueTarget && state.prey.indexOf(f.tongueTarget) >= 0){
+        f.tongueTarget.x = f.x + f.face * st.radius; f.tongueTarget.y = f.y;
+        eatPrey(f.tongueTarget);
+      }
+      f.tongueTarget = null;
+    }
+  } else if(st.tongue > 0 && f.tongueCd <= 0){
+    var nearest = null, nd = 1e9;
+    state.prey.forEach(function(p){
+      var d = torusDist(f.x, f.y, p.x, p.y) - p.r;
+      if(d < nd){ nd = d; nearest = p; }
+    });
+    if(nearest && nd <= st.tongue){
+      f.tongueTarget = nearest; f.tongueT = 0.16; f.tongueCd = 0.55;
+      f.face = wrapDelta(nearest.x - f.x, W - MARGIN*2) >= 0 ? 1 : -1;
+      sndTongue();
+    }
+  }
+
+  /* --- 接触で捕食（端を挟んだ近さでも捕食する） --- */
+  for(var i = state.prey.length-1; i >= 0; i--){
+    var p = state.prey[i];
+    if(torusDist(f.x, f.y, p.x, p.y) < st.radius + p.r + 2){ eatPrey(p); if(state.mode !== "playing") break; }
+  }
+  if(state.mode !== "playing") return;
+
+  updatePrey(dt);
+  updateSnakes(dt);
+  updateParticles(dt);
+  if(state.shake > 0) state.shake -= dt;
+}
+
+function updatePrey(dt){
+  var f = state.frog;
+  state.prey.forEach(function(p){
+    p.flap += dt * 18;
+    var dFrog = torusDist(p.x, p.y, f.x, f.y);
+    /* カエルから逃げる方向も端を挟んで計算する（ワープ直後に変な方向へ逃げない） */
+    var awayX = wrapDelta(p.x - f.x, W - MARGIN*2), awayY = wrapDelta(p.y - f.y, H - MARGIN*2);
+    if(p.type === "kobae"){
+      p.wander += rand(-2.4, 2.4) * dt * 3;
+      p.x += Math.cos(p.wander) * p.speed * dt;
+      p.y += Math.sin(p.wander) * p.speed * dt + Math.sin(state.time*3 + p.flap) * 6 * dt;
+    } else if(p.type === "batta"){
+      p.hopT -= dt;
+      if(p.hopT <= 0){
+        p.hopT = rand(0.5, 1.3);
+        var away = dFrog < 200;
+        var a = away ? Math.atan2(awayY, awayX) + rand(-0.5,0.5) : rand(0, Math.PI*2);
+        p.vx = Math.cos(a) * 260; p.vy = Math.sin(a) * 260;
+      }
+      p.vx *= Math.pow(0.02, dt); p.vy *= Math.pow(0.02, dt);
+      p.x += p.vx * dt; p.y += p.vy * dt;
+    } else { /* tonbo / oniyanma：速く飛び、近づくと逃げる */
+      p.dartT -= dt;
+      if(p.dartT <= 0){
+        p.dartT = rand(0.4, 1.0);
+        var a2;
+        if(dFrog < 230) a2 = Math.atan2(awayY, awayX) + rand(-0.7, 0.7);
+        else a2 = rand(0, Math.PI*2);
+        p.vx = Math.cos(a2); p.vy = Math.sin(a2);
+      }
+      var sp = p.speed * (dFrog < 200 ? 1.25 : 1);
+      p.x += p.vx * sp * dt;
+      p.y += p.vy * sp * dt;
+    }
+    /* 画面端はシームレス：端を越えたら反対側から現れる（速度・向きはそのまま維持）。
+       跳ね返りで端に溜まって捕まるのを防ぐ。カエルも同じ wrapPos で通り抜ける */
+    wrapPos(p);
+  });
+}
+
+function updateSnakes(dt){
+  var f = state.frog;
+  for(var i = 0; i < state.snakes.length; i++){
+    var s = state.snakes[i];
+    if(s.slipT > 0){
+      s.slipT -= dt;
+      s.x += s.slipX * dt; s.y += s.slipY * dt;
+      s.slipX *= Math.pow(0.05, dt); s.slipY *= Math.pow(0.05, dt);
+      s.x = clamp(s.x, MARGIN+24, W-MARGIN-24); s.y = clamp(s.y, MARGIN+24, H-MARGIN-24);
+    } else {
+      var target = s.path[s.wp];
+      var dx = target[0]-s.x, dy = target[1]-s.y, d = Math.sqrt(dx*dx+dy*dy);
+      var spd = 92 + state.stage * 13; /* 速さは従来のまま。脅威は大きさと長さで上げる */
+      if(d < 12) s.wp = (s.wp + 1) % s.path.length;
+      else { s.x += dx/d * spd * dt; s.y += dy/d * spd * dt; }
+    }
+    s.trail.unshift({ x:s.x, y:s.y });
+    if(s.trail.length > 88) s.trail.length = 88; /* 従来46→88：体を長くする */
+
+    /* カエルとの接触（どちらのヘビでも判定する）。太くなった体に合わせて判定も拡大 */
+    if(f.inv <= 0 && dist(s.x, s.y, f.x, f.y) < STAGES[state.stage].radius + 36){
+      if(state.stage >= 3){ slip(s); }
+      else { caught(); return; }
+    }
+  }
+}
+
+function updateParticles(dt){
+  state.particles = state.particles.filter(function(pt){ pt.t += dt; pt.x += pt.vx*dt; pt.y += pt.vy*dt; pt.vy += 160*dt; return pt.t < pt.life; });
+  state.floats = state.floats.filter(function(fl){ fl.t += dt; fl.y -= 34*dt; return fl.t < 0.9; });
+}
+
+/* ---------- 描画 ---------- */
+/* 装飾（草・花・岩）の固定配置。乱数を使わず毎回同じアリーナにする */
+var DECOR = [];
+(function(){
+  var seed = 12345;
+  function srand(){ seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+  for(var i=0;i<70;i++) DECOR.push({ kind:"grass", x:40+srand()*880, y:40+srand()*540, s:0.7+srand()*0.7, a:srand()*0.6-0.3 });
+  for(var j=0;j<14;j++) DECOR.push({ kind:"flower", x:50+srand()*860, y:50+srand()*520, c:["#f48fb1","#fff59d","#ffffff"][j%3] });
+  for(var k=0;k<6;k++) DECOR.push({ kind:"rock", x:60+srand()*840, y:60+srand()*500, r:9+srand()*10 });
+})();
+
+function draw(){
+  ctx.save();
+  if(state.shake > 0){
+    ctx.translate(rand(-1,1)*state.shake*14, rand(-1,1)*state.shake*14);
+  }
+  drawArena();
+  /* 舌の射程リング */
+  var st = STAGES[state.stage], f = state.frog;
+  if(st.tongue > 0 && state.mode !== "title"){
+    var ringR = st.tongue + 12;
+    var ringOffsets = [[0,0]];
+    var rSpanX = W - MARGIN*2, rSpanY = H - MARGIN*2, rdx = 0, rdy = 0;
+    if(f.x - ringR < MARGIN) rdx = rSpanX; else if(f.x + ringR > W - MARGIN) rdx = -rSpanX;
+    if(f.y - ringR < MARGIN) rdy = rSpanY; else if(f.y + ringR > H - MARGIN) rdy = -rSpanY;
+    if(rdx) ringOffsets.push([rdx,0]);
+    if(rdy) ringOffsets.push([0,rdy]);
+    if(rdx && rdy) ringOffsets.push([rdx,rdy]);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2; ctx.setLineDash([7,9]);
+    ringOffsets.forEach(function(o){
+      ctx.beginPath(); ctx.arc(f.x + o[0], f.y + o[1], ringR, 0, Math.PI*2); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+  state.prey.forEach(function(p){
+    drawPrey(p);
+    /* 端に近い獲物は反対側にもゴーストを描き、ワープの継ぎ目をなくす */
+    var spanX = W - MARGIN * 2, spanY = H - MARGIN * 2;
+    var dx = 0, dy = 0;
+    if(p.x < MARGIN + p.r + 2) dx = spanX;
+    else if(p.x > W - MARGIN - p.r - 2) dx = -spanX;
+    if(p.y < MARGIN + p.r + 2) dy = spanY;
+    else if(p.y > H - MARGIN - p.r - 2) dy = -spanY;
+    if(dx || dy){
+      var ox = p.x, oy = p.y;
+      if(dx){ p.x = ox + dx; p.y = oy; drawPrey(p); }
+      if(dy){ p.x = ox; p.y = oy + dy; drawPrey(p); }
+      if(dx && dy){ p.x = ox + dx; p.y = oy + dy; drawPrey(p); }
+      p.x = ox; p.y = oy;
+    }
+  });
+  state.snakes.forEach(drawSnake);
+  drawFrog(0, 0);
+  /* カエルも端に近いときは反対側にゴーストを描き、通り抜けの継ぎ目をなくす（獲物と同じ） */
+  (function(){
+    var spanX = W - MARGIN * 2, spanY = H - MARGIN * 2;
+    var stR = STAGES[state.stage].radius;
+    var dx = 0, dy = 0;
+    if(f.x < MARGIN + stR + 2) dx = spanX;
+    else if(f.x > W - MARGIN - stR - 2) dx = -spanX;
+    if(f.y < MARGIN + stR + 2) dy = spanY;
+    else if(f.y > H - MARGIN - stR - 2) dy = -spanY;
+    if(dx) drawFrog(dx, 0);
+    if(dy) drawFrog(0, dy);
+    if(dx && dy) drawFrog(dx, dy);
+  })();
+  /* パーティクルと浮き文字 */
+  state.particles.forEach(function(pt){
+    ctx.globalAlpha = 1 - pt.t/pt.life;
+    ctx.fillStyle = pt.color;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  state.floats.forEach(function(fl){
+    ctx.globalAlpha = 1 - fl.t/0.9;
+    ctx.font = "bold 17px sans-serif"; ctx.textAlign = "center";
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(20,40,20,0.65)";
+    ctx.strokeText(fl.text, fl.x, fl.y); ctx.fillStyle = fl.color; ctx.fillText(fl.text, fl.x, fl.y);
+  });
+  ctx.globalAlpha = 1;
+  /* タッチ操作の目印 */
+  if(pointer.active && state.mode === "playing"){
+    ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 20, 0, Math.PI*2);
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 3; ctx.stroke();
+    ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 4, 0, Math.PI*2); ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fill();
+  }
+  ctx.restore();
+
+  if(state.paused && state.mode === "playing"){
+    ctx.fillStyle = "rgba(10,20,10,0.45)"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = "#ffffff"; ctx.font = "bold 30px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("一時停止中", W/2, H/2);
+  }
+}
+
+function drawArena(){
+  /* 草原 */
+  var g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, "#86b364"); g.addColorStop(1, "#6f9c4e");
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  /* 土の縁 */
+  ctx.strokeStyle = "#8d6e63"; ctx.lineWidth = MARGIN*2 - 14;
+  ctx.strokeRect(7, 7, W-14, H-14);
+  ctx.strokeStyle = "rgba(62,39,35,0.5)"; ctx.lineWidth = 3;
+  ctx.strokeRect(MARGIN-6, MARGIN-6, W-(MARGIN-6)*2, H-(MARGIN-6)*2);
+
+  /* 池（左下） */
+  var px = 265, py = 415, prx = 235, pry = 150;
+  ctx.beginPath(); ctx.ellipse(px, py, prx+14, pry+14, 0, 0, Math.PI*2);
+  ctx.fillStyle = "#a1887f"; ctx.fill(); /* 池のふち（泥） */
+  ctx.beginPath(); ctx.ellipse(px, py, prx, pry, 0, 0, Math.PI*2);
+  var wg = ctx.createRadialGradient(px-60, py-50, 30, px, py, prx);
+  wg.addColorStop(0, "#4db6ac"); wg.addColorStop(1, "#00796b");
+  ctx.fillStyle = wg; ctx.fill();
+  /* 波紋 */
+  ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2;
+  for(var i=0;i<3;i++){
+    var rr = ((state.time*22 + i*46) % 130);
+    ctx.beginPath(); ctx.ellipse(px-40, py+18, rr, rr*0.42, 0, 0, Math.PI*2);
+    ctx.globalAlpha = 0.35 * (1 - rr/130); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  /* 睡蓮 */
+  [[190,380],[330,455],[255,345]].forEach(function(lp){
+    ctx.beginPath(); ctx.ellipse(lp[0], lp[1], 26, 15, 0.4, 0, Math.PI*2);
+    ctx.fillStyle = "#2e7d32"; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(lp[0], lp[1], 26, 15, 0.4, 0.5, 1.15);
+    ctx.fillStyle = "#00796b"; ctx.fill();
+  });
+  ctx.beginPath(); ctx.arc(196, 372, 6, 0, Math.PI*2); ctx.fillStyle = "#f8bbd0"; ctx.fill();
+
+  /* 装飾 */
+  DECOR.forEach(function(d){
+    if(d.kind === "grass"){
+      if(d.x > 60 && d.x < 480 && d.y > 280 && d.y < 570) return; /* 池の中は描かない */
+      ctx.strokeStyle = "#55803a"; ctx.lineWidth = 2.4;
+      for(var b=-1;b<=1;b++){
+        ctx.beginPath(); ctx.moveTo(d.x, d.y);
+        ctx.quadraticCurveTo(d.x + b*5 + d.a*6, d.y - 9*d.s, d.x + b*8 + d.a*9, d.y - 15*d.s);
+        ctx.stroke();
+      }
+    } else if(d.kind === "flower"){
+      ctx.beginPath(); ctx.arc(d.x, d.y, 4.4, 0, Math.PI*2); ctx.fillStyle = d.c; ctx.fill();
+      ctx.beginPath(); ctx.arc(d.x, d.y, 1.8, 0, Math.PI*2); ctx.fillStyle = "#f9a825"; ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r, d.r*0.7, 0.3, 0, Math.PI*2);
+      ctx.fillStyle = "#9e9e9e"; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(d.x-2, d.y-2, d.r*0.55, d.r*0.36, 0.3, 0, Math.PI*2);
+      ctx.fillStyle = "#bdbdbd"; ctx.fill();
+    }
+  });
+  /* 葦（池のふち） */
+  ctx.strokeStyle = "#33691e"; ctx.lineWidth = 3.4;
+  [452,478,505].forEach(function(x, idx){
+    ctx.beginPath(); ctx.moveTo(x, 520 - idx*16);
+    ctx.quadraticCurveTo(x+7, 470 - idx*16, x+2, 428 - idx*16); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x+2, 424 - idx*16, 4.5, 11, 0.15, 0, Math.PI*2); ctx.fillStyle = "#6d4c41"; ctx.fill();
+  });
+}
+
+function drawPrey(p){
+  ctx.save(); ctx.translate(p.x, p.y);
+  if(p.type === "kobae"){
+    var bz = Math.sin(state.time*26 + p.flap) * 2;
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.beginPath(); ctx.ellipse(-5, -5+bz, 5.5, 2.6, -0.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(5, -5-bz, 5.5, 2.6, 0.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, 5.5, 0, Math.PI*2); ctx.fillStyle = "#4e342e"; ctx.fill();
+    ctx.beginPath(); ctx.arc(-2, -1.5, 1.6, 0, Math.PI*2); ctx.fillStyle = "#ef5350"; ctx.fill();
+  } else if(p.type === "batta"){
+    var sq = Math.abs(p.vx) + Math.abs(p.vy) > 30 ? -3 : 0;
+    ctx.strokeStyle = "#33691e"; ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.moveTo(-3, 3); ctx.lineTo(-13, 10+sq); ctx.lineTo(-7, 13); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, 3); ctx.lineTo(11, 11); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, 12, 6.5, 0, 0, Math.PI*2); ctx.fillStyle = "#7cb342"; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(4, -1.5, 7, 3.6, 0, 0, Math.PI*2); ctx.fillStyle = "#8bc34a"; ctx.fill();
+    ctx.beginPath(); ctx.arc(10, -2, 2, 0, Math.PI*2); ctx.fillStyle = "#1b2b1e"; ctx.fill();
+  } else { /* トンボ / オニヤンマ */
+    var big = p.type === "oniyanma";
+    var dir = (p.vx >= 0 ? 1 : -1);
+    ctx.scale(dir, 1);
+    var wflap = Math.sin(state.time*40 + p.flap) * 0.35;
+    ctx.fillStyle = "rgba(255,255,255,0.65)";
+    [-1,1].forEach(function(s){
+      ctx.save(); ctx.rotate(s * (0.5 + wflap));
+      ctx.beginPath(); ctx.ellipse(-4, s*2, big?24:18, big?5.5:4.2, 0, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+    ctx.beginPath(); ctx.ellipse(0, 0, big?19:14, big?5.4:4.2, 0, 0, Math.PI*2);
+    ctx.fillStyle = big ? "#c17900" : "#00897b"; ctx.fill();
+    ctx.fillStyle = big ? "#8d5a00" : "#00695c";
+    for(var seg=-2; seg<=2; seg++){ ctx.fillRect(seg*6.4 - 1.4, -4.4, 2.8, 8.8); }
+    ctx.beginPath(); ctx.arc(big?16:12, -2.4, big?4.4:3.4, 0, Math.PI*2); ctx.fillStyle = "#b71c1c"; ctx.fill();
+    ctx.beginPath(); ctx.arc(big?16:12, 2.4, big?4.4:3.4, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSnake(s){
+  var pts = s.trail;
+  if(pts.length < 3) return;
+  for(var i = pts.length-1; i >= 2; i -= 2){
+    var t = i / pts.length;
+    var r = 23 * (1 - t*0.55); /* 従来15→23：体を太くする */
+    ctx.beginPath(); ctx.arc(pts[i].x, pts[i].y, r, 0, Math.PI*2);
+    ctx.fillStyle = (Math.floor(i/9) % 2 === 0) ? "#6d7c4f" : "#7d8f5c";
+    ctx.fill();
+    if(Math.floor(i/9) % 2 === 0){
+      ctx.beginPath(); ctx.arc(pts[i].x, pts[i].y, r*0.45, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(62,52,30,0.35)"; ctx.fill();
+    }
+  }
+  /* 頭（体に合わせて拡大） */
+  var headA = 0;
+  if(pts.length > 4) headA = Math.atan2(pts[0].y - pts[4].y, pts[0].x - pts[4].x);
+  ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(headA);
+  if(s.slipT > 0){ /* 滑っている時は目がぐるぐる */
+    ctx.rotate(Math.sin(state.time*30) * 0.4);
+  }
+  ctx.beginPath(); ctx.ellipse(6, 0, 28, 20, 0, 0, Math.PI*2); ctx.fillStyle = "#5c6e43"; ctx.fill();
+  ctx.beginPath(); ctx.arc(16, -9, 5, 0, Math.PI*2); ctx.fillStyle = "#ffecb3"; ctx.fill();
+  ctx.beginPath(); ctx.arc(16, 9, 5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(17.5, -9, 2.5, 0, Math.PI*2); ctx.fillStyle = "#212121"; ctx.fill();
+  ctx.beginPath(); ctx.arc(17.5, 9, 2.5, 0, Math.PI*2); ctx.fill();
+  /* 舌 */
+  var flick = Math.sin(state.time*7) > 0.55 ? 13 : 4;
+  ctx.strokeStyle = "#e53935"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(31, 0); ctx.lineTo(31+flick, 0);
+  ctx.moveTo(31+flick, 0); ctx.lineTo(31+flick+6, -5);
+  ctx.moveTo(31+flick, 0); ctx.lineTo(31+flick+6, 5); ctx.stroke();
+  ctx.restore();
+  if(s.slipT > 0){
+    ctx.font = "bold 15px sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "#ffffff";
+    ctx.fillText("ツルッ…！", s.x, s.y - 44);
+  }
+}
+
+function drawFrog(offX, offY){
+  var f = state.frog, st = STAGES[state.stage];
+  offX = offX || 0; offY = offY || 0;
+  if(f.inv > 0 && state.mode === "playing" && Math.floor(state.time*10) % 2 === 0 && state.stage < 3){
+    /* 被弾後の無敵時間は点滅（最終形態は滑るので点滅させない） */
+    ctx.globalAlpha = 0.45;
+  }
+  var moving = Math.abs(f.vx) + Math.abs(f.vy) > 4;
+  var hopLift = 0, squash = 1;
+  if(moving && state.stage >= 1){ hopLift = Math.max(0, Math.sin(f.hop)) * 10; squash = 1 - Math.max(0, Math.sin(f.hop)) * 0.10; }
+  else if(moving){ hopLift = Math.abs(Math.sin(f.hop)) * 3.5; }
+
+  var x = f.x + offX, y = f.y - hopLift + offY, r = st.radius;
+
+  /* 舌（発射中）— ワールド座標で先に描く。本体（オフセットなし）のときだけ描く */
+  if(!offX && !offY && f.tongueT > 0 && f.tongueTarget){
+    var tp = f.tongueTarget;
+    ctx.strokeStyle = "#ef6c8a"; ctx.lineWidth = 4.5; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x + f.face * r * 0.55, y + 2);
+    ctx.lineTo(tp.x, tp.y);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(tp.x, tp.y, 5.5, 0, Math.PI*2); ctx.fillStyle = "#ef6c8a"; ctx.fill();
+  }
+
+  ctx.save(); ctx.translate(x, y); ctx.scale(f.face * squash, squash);
+
+  /* 影 */
+  ctx.beginPath(); ctx.ellipse(0, r*0.95 + hopLift, r*0.95, r*0.3, 0, 0, Math.PI*2);
+  ctx.fillStyle = "rgba(20,40,15,0.25)"; ctx.fill();
+
+  var bodyColors = ["#9ccc65", "#7cb342", "#558b2f", "#26a69a"];
+  var bellyColors = ["#dcedc8", "#dcedc8", "#c5e1a5", "#b2dfdb"];
+
+  /* 後ろ脚（脚力以降は太い） */
+  ctx.fillStyle = bodyColors[state.stage];
+  var legW = state.stage >= 1 ? r*0.52 : r*0.38;
+  ctx.beginPath(); ctx.ellipse(-r*0.62, r*0.52, legW, legW*0.66, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(r*0.1, r*0.66, legW*0.9, legW*0.55, 0.25, 0, Math.PI*2); ctx.fill();
+  /* 体 */
+  ctx.beginPath(); ctx.ellipse(0, 0, r, r*0.84, 0, 0, Math.PI*2); ctx.fillStyle = bodyColors[state.stage]; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(r*0.14, r*0.3, r*0.62, r*0.44, 0, 0, Math.PI*2); ctx.fillStyle = bellyColors[state.stage]; ctx.fill();
+  /* 背中の模様 */
+  if(state.stage >= 2){
+    ctx.fillStyle = "rgba(27,60,25,0.4)";
+    [[-r*0.35,-r*0.3],[r*0.22,-r*0.45],[-r*0.05,-r*0.12]].forEach(function(sp){
+      ctx.beginPath(); ctx.arc(sp[0], sp[1], r*0.13, 0, Math.PI*2); ctx.fill();
+    });
+  }
+  /* 目（頭の上に2つ並ぶ） */
+  [[r*0.02, -r*0.74],[r*0.48, -r*0.68]].forEach(function(ep){
+    ctx.beginPath(); ctx.arc(ep[0], ep[1], r*0.29, 0, Math.PI*2);
+    ctx.fillStyle = bodyColors[state.stage]; ctx.fill();
+    ctx.beginPath(); ctx.arc(ep[0]+r*0.03, ep[1], r*0.185, 0, Math.PI*2); ctx.fillStyle = "#fffde7"; ctx.fill();
+    ctx.beginPath(); ctx.arc(ep[0]+r*0.08, ep[1], r*0.10, 0, Math.PI*2); ctx.fillStyle = "#1b2b1e"; ctx.fill();
+  });
+  /* 口 */
+  ctx.strokeStyle = "rgba(27,43,30,0.75)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(r*0.42, r*0.02, r*0.34, 0.25, Math.PI - 1.15); ctx.stroke();
+
+  /* 最終形態のヌルヌル光沢 */
+  if(state.stage >= 3){
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 3.4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(-r*0.18, -r*0.12, r*0.52, Math.PI*1.08, Math.PI*1.55); ctx.stroke();
+    ctx.beginPath(); ctx.arc(r*0.3, r*0.28, r*0.3, Math.PI*0.15, Math.PI*0.6); ctx.stroke();
+    var tw = 0.5 + 0.5*Math.sin(state.time*4);
+    ctx.globalAlpha = 0.4 + 0.6*tw;
+    ctx.fillStyle = "#ffffff";
+    [[-r*0.55,-r*0.5],[r*0.55,-r*0.28]].forEach(function(sp){
+      ctx.beginPath(); ctx.arc(sp[0], sp[1], 2.6, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- メインループ ---------- */
+var lastTs = 0;
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!lastTs) lastTs = ts;
+  var dt = Math.min(0.05, (ts - lastTs)/1000);
+  lastTs = ts;
+  if(state.mode === "title"){ state.time += dt; updateParticles(dt); }
+  else update(dt);
+  draw();
+}
+requestAnimationFrame(loop);
+
+/* ---------- ボタン ---------- */
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("againBtn").addEventListener("click", startGame);
+document.getElementById("resetBtn").addEventListener("click", function(){
+  if(state.mode === "title") return;
+  startGame(); showBanner("はじめからやり直し");
+});
+document.getElementById("pauseBtn").addEventListener("click", togglePause);
+document.getElementById("soundBtn").addEventListener("click", function(){
+  soundOn = !soundOn;
+  this.textContent = soundOn ? "音：オン" : "音：オフ";
+  if(soundOn) sndEat();
+});
+
+/* ---------- キャンバスの解像度（Retina対応） ---------- */
+(function(){
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  if(dpr > 1){
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+})();
+
+syncHUD();
+</script>
+</body>
+</html>
