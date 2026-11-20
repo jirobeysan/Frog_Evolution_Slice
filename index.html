@@ -205,7 +205,7 @@
   </div>
 
   <!-- Game stage -->
-  <div class="stage-wrap" id="stageWrap" tabindex="0" aria-label="ゲーム画面。WASDキーか矢印キー、またはタップとドラッグでカエルを動かします。">
+  <div class="stage-wrap" id="stageWrap" tabindex="0" aria-label="ゲーム画面。WASDキーか矢印キー、またはタップした地点への移動でカエルを動かします。">
     <canvas id="game" width="960" height="620"></canvas>
     <div class="banner" id="banner"></div>
 
@@ -217,7 +217,7 @@
         <p class="shift-line">食べて進化、SHIFTして池の頂点へ</p>
         <p>池と草原の小さなアリーナで獲物を食べ続けると、カエルは3回進化します。脚が速くなり、舌が伸び、最後はヌルヌルの肌に。大きくて長い2匹のヘビに捕まると、その段階で食べた数がリセットされます。最終形態では捕まりませんが、当たると弾き飛ばされます。</p>
         <ul class="howto">
-          <li><b>移動だけ</b>： WASD／矢印キー、スマホはタップ＆ドラッグ</li>
+          <li><b>移動だけ</b>： WASD／矢印キー、スマホはタップした地点へ移動</li>
           <li><b>画面端は通り抜け</b>：カエルも端を越えて反対側から出てきます。追い詰めた獲物を逃がしません</li>
           <li><b>捕食は自動</b>：獲物に触れるだけ。進化すると舌が勝手に伸びます</li>
           <li><b>目標</b>：合計30匹食べて最終形態になり、オニヤンマを仕留める</li>
@@ -255,7 +255,7 @@
     <button class="btn-ghost" id="pauseBtn" type="button">一時停止</button>
     <button class="btn-ghost" id="resetBtn" type="button">はじめから</button>
     <button class="btn-ghost" id="soundBtn" type="button">音：オン</button>
-    <span class="controls-note">移動：WASD／矢印キー、タップ＆ドラッグ　／　一時停止：P または Esc</span>
+    <span class="controls-note">移動：WASD／矢印キー、タップ移動　／　一時停止：P または Esc</span>
   </div>
 
   <!-- Guides -->
@@ -275,7 +275,7 @@
         </li>
         <li>
           <span class="dot" style="background:#558b2f;"></span>
-          <div><b>長舌カエル</b><span>舌が届く範囲（うっすら見える輪）に入った獲物を、自動で舌で捕る。速いトンボも届く。</span></div>
+          <div><b>長舌カエル</b><span>舌が届く範囲（うっすら見える輪）に入った獲物に、自動で舌が伸びる。届く前に射程外へ逃げられるとミス。端越しには届かない。</span></div>
           <span class="need">11匹で進化</span>
         </li>
         <li>
@@ -323,7 +323,7 @@ var STAGES = [
   { name:"脚力カエル",         speed:238, radius:20, tongue:0,   need:9,
     evoDesc:"脚力がついた。移動が速くなり、ピョンピョン跳ねて進める。逃げるバッタにも追いつける。" },
   { name:"長舌カエル",         speed:248, radius:23, tongue:158, need:11,
-    evoDesc:"舌が長く伸びた。輪の範囲に入った獲物を、舌が自動で捕まえる。速いトンボも届く。" },
+    evoDesc:"舌が長く伸びた。輪の範囲に入った獲物に舌が自動で伸びる。ただし舌が届く前に射程外へ逃げられるとミスになる。端の向こう側には届かない。" },
   { name:"ヌルヌルカエル",     speed:262, radius:26, tongue:172, need:3,
     evoDesc:"最終形態。全身ヌルヌルの肌で、ヘビに捕まることはない。ただし当たると弾き飛ばされるので、近づきすぎは禁物。仕上げにオニヤンマを3匹仕留めよう。" }
 ];
@@ -425,7 +425,11 @@ function sndClear(){ [523,659,784,1046,1318].forEach(function(f,i){ beep(f,0.22,
 
 /* ---------- 入力 ---------- */
 var keys = {};
-var pointer = { active:false, x:0, y:0, anchorX:0, anchorY:0, frogX:0, frogY:0, drove:false };
+/* タップ移動：タップした地点を移動目標にする。EVOSUVACプロトタイプと同じ方式。
+   ドラッグ方式より操作性が良いため、シュンの判断で正式な操作方式にした（2026-11-21）。
+   押している間は目標が指に追従し、離してもカエルは目標へ進み続ける */
+var pointer = { down:false };
+var moveTarget = { active:false, x:0, y:0 };
 window.addEventListener("keydown", function(e){
   var k = e.key.toLowerCase();
   if(["arrowup","arrowdown","arrowleft","arrowright"," "].indexOf(k) >= 0) e.preventDefault();
@@ -440,19 +444,15 @@ function canvasPos(e){
 }
 canvas.addEventListener("pointerdown", function(e){
   var p = canvasPos(e);
-  pointer.active = true; pointer.x = p.x; pointer.y = p.y;
-  /* タップのたびに「タップした位置」と「その時点のカエルの位置」をセットで覚え直す。
-     覚え直さないと、端を越えた直後の再タップでカエルが端回りの最短方向へ逆走してしまう */
-  pointer.anchorX = p.x; pointer.anchorY = p.y;
-  pointer.frogX = state.frog.x; pointer.frogY = state.frog.y;
-  pointer.drove = false;
+  pointer.down = true;
+  moveTarget.active = true; moveTarget.x = p.x; moveTarget.y = p.y;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", function(e){
-  if(!pointer.active) return;
-  var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y;
+  if(!pointer.down) return;
+  var p = canvasPos(e); moveTarget.x = p.x; moveTarget.y = p.y;
 });
-function pointerOff(){ pointer.active = false; }
+function pointerOff(){ pointer.down = false; }
 canvas.addEventListener("pointerup", pointerOff);
 canvas.addEventListener("pointercancel", pointerOff);
 
@@ -562,11 +562,8 @@ function caught(){
   state.frog.vx = 0; state.frog.vy = 0;
   state.frog.kbX = 0; state.frog.kbY = 0; state.frog.kbT = 0;
   state.frog.inv = 3;
-  /* カエルが移動したので、ドラッグ中なら基準点を付け直す（古い基準点のままだと逆方向へ引っ張られる） */
-  if(pointer.active){
-    pointer.anchorX = pointer.x; pointer.anchorY = pointer.y;
-    pointer.frogX = state.frog.x; pointer.frogY = state.frog.y;
-  }
+  /* テレポートしたので、移動目標は解除する */
+  moveTarget.active = false;
   state.snakes.forEach(function(s){ s.wp = 0; });
   showBanner("ヘビに捕まった！この段階で食べた数がリセット", "bad");
   sndCaught();
@@ -582,11 +579,6 @@ function slip(s){
      リセットはない代わりに、位置と操作の主導権を失うのでヘビの脅威は残る */
   var f = state.frog;
   f.kbX = -dx/d * 560; f.kbY = -dy/d * 560; f.kbT = 0.38;
-  /* ドラッグ中なら基準点を付け直す（弾かれた先で古い基準点のままだと逆方向へ引っ張られる） */
-  if(pointer.active){
-    pointer.anchorX = pointer.x; pointer.anchorY = pointer.y;
-    pointer.frogX = f.x; pointer.frogY = f.y;
-  }
   state.shake = Math.max(state.shake, 0.2);
   burst(f.x, f.y, "#b2dfdb", 10);
   state.frog.inv = Math.max(state.frog.inv, 1.4);
@@ -648,35 +640,17 @@ function update(dt){
   if(keys["s"] || keys["arrowdown"]) my += 1;
   if(keys["a"] || keys["arrowleft"]) mx -= 1;
   if(keys["d"] || keys["arrowright"]) mx += 1;
-  if(pointer.active){
-    /* 相対ドラッグ：目標位置 = タップ時のカエルの位置 + 指の移動量。
-       タップしただけではカエルは動かず、指を動かした分だけ付いてくる。
-       目標との差は端を挟んで計算するので、ドラッグの途中でカエルが端を越えても方向は反転しない。
-       ただし指の移動量は半周未満に制限する。目標がカエルから半周以上離れると、
-       端回りの最短計算（wrapDelta）が「反対側の端を回る方が近い」と判断して方向を反転させてしまう。
-       指を画面外へ大きくはみ出させるとカエルだけが速度上限で遅れて差が開き、反転と復帰を繰り返す
-       バウンドが起きていた（2026-11-20 シュンのテストプレイで発見・原因特定済み）。 */
+  if(mx !== 0 || my !== 0){
+    /* キーボード入力が優先され、移動目標は解除される（EVOSUVACと同じ） */
+    moveTarget.active = false;
+  } else if(moveTarget.active){
+    /* タップ移動：目標との差は端を挟んで計算するので、端の向こう側の地点を
+       タップしても最短方向へ進む。到達したら目標を解除する */
     var spanXp = W - MARGIN*2, spanYp = H - MARGIN*2;
-    var disX = clamp(pointer.x - pointer.anchorX, -(spanXp/2 - 34), spanXp/2 - 34);
-    var disY = clamp(pointer.y - pointer.anchorY, -(spanYp/2 - 34), spanYp/2 - 34);
-    var txp = pointer.frogX + disX;
-    var typ = pointer.frogY + disY;
-    var pdx = wrapDelta(txp - f.x, spanXp), pdy = wrapDelta(typ - f.y, spanYp), pd = Math.sqrt(pdx*pdx+pdy*pdy);
-    if(pd > 14){ mx = pdx/pd; my = pdy/pd; pointer.drove = true; }
-    else {
-      mx = 0; my = 0;
-      /* 目標に追いついたら基準点を付け直す（指を動かし続けてもカエルが止まらないように）。
-         追いかけた末の到達のときだけ付け直す。付け直しが早すぎると、ゆっくりしたドラッグで
-         移動量が毎フレーム消えてしまい、カエルが反応しなくなる。
-         付け直しの際は今の目標位置を保つ（残りの距離を捨てると、ゆっくりしたドラッグで
-         毎回少しずつ遅れが溜まってしまうため） */
-      if(pointer.drove){
-        pointer.drove = false;
-        var keepX = txp - f.x, keepY = typ - f.y;
-        pointer.anchorX = pointer.x - keepX; pointer.anchorY = pointer.y - keepY;
-        pointer.frogX = f.x; pointer.frogY = f.y;
-      }
-    }
+    var mdx = wrapDelta(moveTarget.x - f.x, spanXp), mdy = wrapDelta(moveTarget.y - f.y, spanYp);
+    var md = Math.sqrt(mdx*mdx + mdy*mdy);
+    if(md > 10){ mx = mdx/md; my = mdy/md; }
+    else moveTarget.active = false;
   }
   var mag = Math.sqrt(mx*mx+my*my);
   if(mag > 1){ mx/=mag; my/=mag; }
@@ -694,24 +668,16 @@ function update(dt){
   /* カエルも画面端はシームレス：獲物と同じく端を越えたら反対側から現れる。
      以前はここが clamp で止まっていたため、端に追い詰めた獲物がワープすると取り逃がしていた */
   f.x += f.vx*dt; f.y += f.vy*dt;
-  var preWrapX = f.x, preWrapY = f.y;
   wrapPos(f);
-  /* カエルが端を越えたら、ドラッグの基準点も同じだけずらす
-     （目標との差が端の分だけ跳ねて、方向が反転しないように） */
-  if(pointer.active){ pointer.frogX += f.x - preWrapX; pointer.frogY += f.y - preWrapY; }
-  /* ヘビに弾かれた勢い（最終形態で接触したとき）。減衰しながら滑り、
-     ドラッグの基準点も一緒にずらして逆方向へ引っ張られないようにする */
+  /* ヘビに弾かれた勢い（最終形態で接触したとき）。減衰しながら滑る。
+     移動目標はそのまま残るので、弾かれた後は目標への移動を再開する */
   if(f.kbT > 0){
     f.kbT -= dt;
     var kbDx = f.kbX * dt, kbDy = f.kbY * dt;
     f.x += kbDx; f.y += kbDy;
-    if(pointer.active){ pointer.frogX += kbDx; pointer.frogY += kbDy; }
     var kbDecay = Math.pow(0.002, dt);
     f.kbX *= kbDecay; f.kbY *= kbDecay;
-    var preKbWrapX = f.x, preKbWrapY = f.y;
     wrapPos(f);
-    /* 弾かれた勢いで端を越えた場合も、ドラッグの基準点を同じだけずらす */
-    if(pointer.active){ pointer.frogX += f.x - preKbWrapX; pointer.frogY += f.y - preKbWrapY; }
   }
   if(mx !== 0) f.face = mx > 0 ? 1 : -1;
   if(f.inv > 0) f.inv -= dt;
@@ -721,28 +687,22 @@ function update(dt){
   if(f.tongueT > 0){
     f.tongueT -= dt;
     if(f.tongueT <= 0){
-      /* ターゲットは舌が届くこの瞬間まで保持する。
-         以前は発射中の毎フレームで null に戻していたため、届く前に捕食がキャンセルされていた */
+      /* 新しい舌（仕様通り）：ターゲットは舌が届くこの瞬間まで保持し、
+         届いた瞬間に射程内にいるか直線距離で再判定する。
+         射程内に留まればその場で捕食し、伸びている間に射程外へ逃げた獲物は
+         ミスになる（引き寄せ捕食はしない）。
+         舌の射程は端を回らない直線距離で測るため、端の向こう側の獲物は
+         対象にならず、端越しの狙撃も起きない。接触捕食は従来通り端を挟んでも成立する */
       if(f.tongueTarget && state.prey.indexOf(f.tongueTarget) >= 0){
-        /* 舌が届いた瞬間に、獲物がまだ射程内にいる場合だけ捕食が成立する。
-           伸びている間に射程外へ逃げた獲物は捕まらない（引き寄せ捕食は廃止し、
-           獲物はその場で食べる）。シュンの判断でこの挙動にそろえた（2026-11-20） */
-        var cdx = f.tongueTarget.x - f.x, cdy = f.tongueTarget.y - f.y;
-        if(Math.sqrt(cdx*cdx + cdy*cdy) - f.tongueTarget.r <= st.tongue){
-          eatPrey(f.tongueTarget);
-        }
+        var td = dist(f.x, f.y, f.tongueTarget.x, f.tongueTarget.y) - f.tongueTarget.r;
+        if(td <= st.tongue) eatPrey(f.tongueTarget);
       }
       f.tongueTarget = null;
     }
   } else if(st.tongue > 0 && f.tongueCd <= 0){
-    /* 舌のリーチは通常の直線距離で測る（仕様通り）。
-       以前は端を挟んだ距離（torusDist）で測っていたため、端の向こう側にいる獲物を
-       画面の端から端まで舌で狙撃できた。面白い挙動ではあったが、シュンの判断で
-       仕様通りに修正した（2026-11-20）。接触での捕食は従来通り端を挟んでも成立する */
     var nearest = null, nd = 1e9;
     state.prey.forEach(function(p){
-      var tdx = p.x - f.x, tdy = p.y - f.y;
-      var d = Math.sqrt(tdx*tdx + tdy*tdy) - p.r;
+      var d = dist(f.x, f.y, p.x, p.y) - p.r;
       if(d < nd){ nd = d; nearest = p; }
     });
     if(nearest && nd <= st.tongue){
@@ -854,21 +814,12 @@ function draw(){
     ctx.translate(rand(-1,1)*state.shake*14, rand(-1,1)*state.shake*14);
   }
   drawArena();
-  /* 舌の射程リング */
+  /* 舌の射程リング（直線距離なので端を回らない：輪は1つだけ描く） */
   var st = STAGES[state.stage], f = state.frog;
   if(st.tongue > 0 && state.mode !== "title"){
     var ringR = st.tongue + 12;
-    var ringOffsets = [[0,0]];
-    var rSpanX = W - MARGIN*2, rSpanY = H - MARGIN*2, rdx = 0, rdy = 0;
-    if(f.x - ringR < MARGIN) rdx = rSpanX; else if(f.x + ringR > W - MARGIN) rdx = -rSpanX;
-    if(f.y - ringR < MARGIN) rdy = rSpanY; else if(f.y + ringR > H - MARGIN) rdy = -rSpanY;
-    if(rdx) ringOffsets.push([rdx,0]);
-    if(rdy) ringOffsets.push([0,rdy]);
-    if(rdx && rdy) ringOffsets.push([rdx,rdy]);
     ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2; ctx.setLineDash([7,9]);
-    ringOffsets.forEach(function(o){
-      ctx.beginPath(); ctx.arc(f.x + o[0], f.y + o[1], ringR, 0, Math.PI*2); ctx.stroke();
-    });
+    ctx.beginPath(); ctx.arc(f.x, f.y, ringR, 0, Math.PI*2); ctx.stroke();
     ctx.setLineDash([]);
   }
   state.prey.forEach(function(p){
@@ -917,11 +868,20 @@ function draw(){
     ctx.strokeText(fl.text, fl.x, fl.y); ctx.fillStyle = fl.color; ctx.fillText(fl.text, fl.x, fl.y);
   });
   ctx.globalAlpha = 1;
-  /* タッチ操作の目印 */
-  if(pointer.active && state.mode === "playing"){
-    ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 20, 0, Math.PI*2);
-    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 3; ctx.stroke();
-    ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 4, 0, Math.PI*2); ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fill();
+  /* 移動目標の目印（端に近いときは反対側にもゴーストを描く） */
+  if(moveTarget.active && state.mode === "playing"){
+    var mSpanX = W - MARGIN * 2, mSpanY = H - MARGIN * 2;
+    var mOffs = [[0,0]];
+    if(moveTarget.x < MARGIN + 22) mOffs.push([mSpanX, 0]);
+    else if(moveTarget.x > W - MARGIN - 22) mOffs.push([-mSpanX, 0]);
+    if(moveTarget.y < MARGIN + 22) mOffs.push([0, mSpanY]);
+    else if(moveTarget.y > H - MARGIN - 22) mOffs.push([0, -mSpanY]);
+    if(mOffs.length === 3) mOffs.push([mOffs[1][0], mOffs[2][1]]);
+    mOffs.forEach(function(o){
+      ctx.beginPath(); ctx.arc(moveTarget.x + o[0], moveTarget.y + o[1], 20, 0, Math.PI*2);
+      ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 3; ctx.stroke();
+      ctx.beginPath(); ctx.arc(moveTarget.x + o[0], moveTarget.y + o[1], 4, 0, Math.PI*2); ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fill();
+    });
   }
   ctx.restore();
 
@@ -1090,17 +1050,18 @@ function drawFrog(offX, offY){
   /* 舌（発射中）— ワールド座標で先に描く。本体（オフセットなし）のときだけ描く */
   if(!offX && !offY && f.tongueT > 0 && f.tongueTarget){
     var tp = f.tongueTarget;
-    /* 舌は射程までしか伸びない（獲物が射程外へ逃げたら先端は届かない） */
-    var mouthX = x + f.face * r * 0.55, mouthY = y + 2;
-    var tgDx = tp.x - mouthX, tgDy = tp.y - mouthY, tgD = Math.sqrt(tgDx*tgDx + tgDy*tgDy);
-    var tgLen = Math.min(tgD, st.tongue);
-    var tgEx = tgD > 0 ? mouthX + tgDx / tgD * tgLen : tp.x;
-    var tgEy = tgD > 0 ? mouthY + tgDy / tgD * tgLen : tp.y;
+    /* 舌の先は射程（st.tongue + 獲物の半径）までしか伸ばさない。
+       直線方向へ伸ばし、射程外へ逃げた獲物に舌がどこまでも
+       追いかけて見えないようにする */
+    var tdx = tp.x - f.x, tdy = tp.y - f.y;
+    var tdist = Math.sqrt(tdx*tdx + tdy*tdy), tmax = st.tongue + tp.r;
+    var tscale = (tdist > tmax && tdist > 0) ? tmax/tdist : 1;
+    var tipX = f.x + tdx*tscale, tipY = f.y + tdy*tscale;
     ctx.strokeStyle = "#ef6c8a"; ctx.lineWidth = 4.5; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(mouthX, mouthY);
-    ctx.lineTo(tgEx, tgEy);
+    ctx.beginPath(); ctx.moveTo(x + f.face * r * 0.55, y + 2);
+    ctx.lineTo(tipX, tipY);
     ctx.stroke();
-    ctx.beginPath(); ctx.arc(tgEx, tgEy, 5.5, 0, Math.PI*2); ctx.fillStyle = "#ef6c8a"; ctx.fill();
+    ctx.beginPath(); ctx.arc(tipX, tipY, 5.5, 0, Math.PI*2); ctx.fillStyle = "#ef6c8a"; ctx.fill();
   }
 
   ctx.save(); ctx.translate(x, y); ctx.scale(f.face * squash, squash);
