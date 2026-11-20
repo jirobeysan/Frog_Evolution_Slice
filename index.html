@@ -724,8 +724,13 @@ function update(dt){
       /* ターゲットは舌が届くこの瞬間まで保持する。
          以前は発射中の毎フレームで null に戻していたため、届く前に捕食がキャンセルされていた */
       if(f.tongueTarget && state.prey.indexOf(f.tongueTarget) >= 0){
-        f.tongueTarget.x = f.x + f.face * st.radius; f.tongueTarget.y = f.y;
-        eatPrey(f.tongueTarget);
+        /* 舌が届いた瞬間に、獲物がまだ射程内にいる場合だけ捕食が成立する。
+           伸びている間に射程外へ逃げた獲物は捕まらない（引き寄せ捕食は廃止し、
+           獲物はその場で食べる）。シュンの判断でこの挙動にそろえた（2026-11-20） */
+        var cdx = f.tongueTarget.x - f.x, cdy = f.tongueTarget.y - f.y;
+        if(Math.sqrt(cdx*cdx + cdy*cdy) - f.tongueTarget.r <= st.tongue){
+          eatPrey(f.tongueTarget);
+        }
       }
       f.tongueTarget = null;
     }
@@ -1085,11 +1090,17 @@ function drawFrog(offX, offY){
   /* 舌（発射中）— ワールド座標で先に描く。本体（オフセットなし）のときだけ描く */
   if(!offX && !offY && f.tongueT > 0 && f.tongueTarget){
     var tp = f.tongueTarget;
+    /* 舌は射程までしか伸びない（獲物が射程外へ逃げたら先端は届かない） */
+    var mouthX = x + f.face * r * 0.55, mouthY = y + 2;
+    var tgDx = tp.x - mouthX, tgDy = tp.y - mouthY, tgD = Math.sqrt(tgDx*tgDx + tgDy*tgDy);
+    var tgLen = Math.min(tgD, st.tongue);
+    var tgEx = tgD > 0 ? mouthX + tgDx / tgD * tgLen : tp.x;
+    var tgEy = tgD > 0 ? mouthY + tgDy / tgD * tgLen : tp.y;
     ctx.strokeStyle = "#ef6c8a"; ctx.lineWidth = 4.5; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(x + f.face * r * 0.55, y + 2);
-    ctx.lineTo(tp.x, tp.y);
+    ctx.beginPath(); ctx.moveTo(mouthX, mouthY);
+    ctx.lineTo(tgEx, tgEy);
     ctx.stroke();
-    ctx.beginPath(); ctx.arc(tp.x, tp.y, 5.5, 0, Math.PI*2); ctx.fillStyle = "#ef6c8a"; ctx.fill();
+    ctx.beginPath(); ctx.arc(tgEx, tgEy, 5.5, 0, Math.PI*2); ctx.fillStyle = "#ef6c8a"; ctx.fill();
   }
 
   ctx.save(); ctx.translate(x, y); ctx.scale(f.face * squash, squash);
