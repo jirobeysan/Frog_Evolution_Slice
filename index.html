@@ -425,7 +425,7 @@ function sndClear(){ [523,659,784,1046,1318].forEach(function(f,i){ beep(f,0.22,
 
 /* ---------- 入力 ---------- */
 var keys = {};
-var pointer = { active:false, x:0, y:0, anchorX:0, anchorY:0, frogX:0, frogY:0 };
+var pointer = { active:false, x:0, y:0, anchorX:0, anchorY:0, frogX:0, frogY:0, drove:false };
 window.addEventListener("keydown", function(e){
   var k = e.key.toLowerCase();
   if(["arrowup","arrowdown","arrowleft","arrowright"," "].indexOf(k) >= 0) e.preventDefault();
@@ -445,6 +445,7 @@ canvas.addEventListener("pointerdown", function(e){
      覚え直さないと、端を越えた直後の再タップでカエルが端回りの最短方向へ逆走してしまう */
   pointer.anchorX = p.x; pointer.anchorY = p.y;
   pointer.frogX = state.frog.x; pointer.frogY = state.frog.y;
+  pointer.drove = false;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", function(e){
@@ -650,13 +651,32 @@ function update(dt){
   if(pointer.active){
     /* 相対ドラッグ：目標位置 = タップ時のカエルの位置 + 指の移動量。
        タップしただけではカエルは動かず、指を動かした分だけ付いてくる。
-       目標との差は端を挟んで計算するので、ドラッグの途中でカエルが端を越えても方向は反転しない */
+       目標との差は端を挟んで計算するので、ドラッグの途中でカエルが端を越えても方向は反転しない。
+       ただし指の移動量は半周未満に制限する。目標がカエルから半周以上離れると、
+       端回りの最短計算（wrapDelta）が「反対側の端を回る方が近い」と判断して方向を反転させてしまう。
+       指を画面外へ大きくはみ出させるとカエルだけが速度上限で遅れて差が開き、反転と復帰を繰り返す
+       バウンドが起きていた（2026-11-20 シュンのテストプレイで発見・原因特定済み）。 */
     var spanXp = W - MARGIN*2, spanYp = H - MARGIN*2;
-    var txp = pointer.frogX + (pointer.x - pointer.anchorX);
-    var typ = pointer.frogY + (pointer.y - pointer.anchorY);
+    var disX = clamp(pointer.x - pointer.anchorX, -(spanXp/2 - 34), spanXp/2 - 34);
+    var disY = clamp(pointer.y - pointer.anchorY, -(spanYp/2 - 34), spanYp/2 - 34);
+    var txp = pointer.frogX + disX;
+    var typ = pointer.frogY + disY;
     var pdx = wrapDelta(txp - f.x, spanXp), pdy = wrapDelta(typ - f.y, spanYp), pd = Math.sqrt(pdx*pdx+pdy*pdy);
-    if(pd > 14){ mx = pdx/pd; my = pdy/pd; }
-    else { mx = 0; my = 0; }
+    if(pd > 14){ mx = pdx/pd; my = pdy/pd; pointer.drove = true; }
+    else {
+      mx = 0; my = 0;
+      /* 目標に追いついたら基準点を付け直す（指を動かし続けてもカエルが止まらないように）。
+         追いかけた末の到達のときだけ付け直す。付け直しが早すぎると、ゆっくりしたドラッグで
+         移動量が毎フレーム消えてしまい、カエルが反応しなくなる。
+         付け直しの際は今の目標位置を保つ（残りの距離を捨てると、ゆっくりしたドラッグで
+         毎回少しずつ遅れが溜まってしまうため） */
+      if(pointer.drove){
+        pointer.drove = false;
+        var keepX = txp - f.x, keepY = typ - f.y;
+        pointer.anchorX = pointer.x - keepX; pointer.anchorY = pointer.y - keepY;
+        pointer.frogX = f.x; pointer.frogY = f.y;
+      }
+    }
   }
   var mag = Math.sqrt(mx*mx+my*my);
   if(mag > 1){ mx/=mag; my/=mag; }
@@ -674,7 +694,11 @@ function update(dt){
   /* カエルも画面端はシームレス：獲物と同じく端を越えたら反対側から現れる。
      以前はここが clamp で止まっていたため、端に追い詰めた獲物がワープすると取り逃がしていた */
   f.x += f.vx*dt; f.y += f.vy*dt;
+  var preWrapX = f.x, preWrapY = f.y;
   wrapPos(f);
+  /* カエルが端を越えたら、ドラッグの基準点も同じだけずらす
+     （目標との差が端の分だけ跳ねて、方向が反転しないように） */
+  if(pointer.active){ pointer.frogX += f.x - preWrapX; pointer.frogY += f.y - preWrapY; }
   /* ヘビに弾かれた勢い（最終形態で接触したとき）。減衰しながら滑り、
      ドラッグの基準点も一緒にずらして逆方向へ引っ張られないようにする */
   if(f.kbT > 0){
@@ -684,7 +708,10 @@ function update(dt){
     if(pointer.active){ pointer.frogX += kbDx; pointer.frogY += kbDy; }
     var kbDecay = Math.pow(0.002, dt);
     f.kbX *= kbDecay; f.kbY *= kbDecay;
+    var preKbWrapX = f.x, preKbWrapY = f.y;
     wrapPos(f);
+    /* 弾かれた勢いで端を越えた場合も、ドラッグの基準点を同じだけずらす */
+    if(pointer.active){ pointer.frogX += f.x - preKbWrapX; pointer.frogY += f.y - preKbWrapY; }
   }
   if(mx !== 0) f.face = mx > 0 ? 1 : -1;
   if(f.inv > 0) f.inv -= dt;
@@ -703,14 +730,19 @@ function update(dt){
       f.tongueTarget = null;
     }
   } else if(st.tongue > 0 && f.tongueCd <= 0){
+    /* 舌のリーチは通常の直線距離で測る（仕様通り）。
+       以前は端を挟んだ距離（torusDist）で測っていたため、端の向こう側にいる獲物を
+       画面の端から端まで舌で狙撃できた。面白い挙動ではあったが、シュンの判断で
+       仕様通りに修正した（2026-11-20）。接触での捕食は従来通り端を挟んでも成立する */
     var nearest = null, nd = 1e9;
     state.prey.forEach(function(p){
-      var d = torusDist(f.x, f.y, p.x, p.y) - p.r;
+      var tdx = p.x - f.x, tdy = p.y - f.y;
+      var d = Math.sqrt(tdx*tdx + tdy*tdy) - p.r;
       if(d < nd){ nd = d; nearest = p; }
     });
     if(nearest && nd <= st.tongue){
       f.tongueTarget = nearest; f.tongueT = 0.16; f.tongueCd = 0.55;
-      f.face = wrapDelta(nearest.x - f.x, W - MARGIN*2) >= 0 ? 1 : -1;
+      f.face = (nearest.x - f.x) >= 0 ? 1 : -1;
       sndTongue();
     }
   }
