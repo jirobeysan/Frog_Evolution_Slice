@@ -32,11 +32,11 @@
     }
   }
   *{ box-sizing:border-box; }
-  html,body{ margin:0; padding:0; }
+  html,body{ margin:0; padding:0; overscroll-behavior:none; }
   body{
     background:var(--bg); color:var(--ink);
     font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;
-    line-height:1.6; -webkit-text-size-adjust:100%;
+    line-height:1.6; -webkit-text-size-adjust:100%; -webkit-tap-highlight-color:transparent;
   }
   button{ font:inherit; min-height:44px; cursor:pointer; }
   .wrap{ max-width:1020px; margin:0 auto; padding:14px 14px 40px; }
@@ -64,7 +64,7 @@
   .stage-wrap{
     position:relative; border-radius:14px; overflow:hidden;
     box-shadow:var(--shadow); border:1px solid var(--line);
-    background:#79a85b; touch-action:none;
+    background:#79a85b; touch-action:none; user-select:none; -webkit-user-select:none;
   }
   canvas{ display:block; width:100%; height:auto; }
   .stage-wrap:focus-visible{ outline:3px solid var(--pond); outline-offset:2px; }
