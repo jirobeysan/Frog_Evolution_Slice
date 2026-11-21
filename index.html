@@ -777,7 +777,7 @@ function updateSnakes(dt){
     } else {
       var target = s.path[s.wp];
       var dx = target[0]-s.x, dy = target[1]-s.y, d = Math.sqrt(dx*dx+dy*dy);
-      var spd = 110 + state.stage * 18; /* シュンの決定（2026-11-21）：基準は旧92の20%増しで110、段階ごとの伸びはカエルの始め（178）と終わり（262）の速度に合わせた18 */
+      var spd = 129 + state.stage * 20; /* シュンの決定（2026-11-21）：基準は当初の92の40%増しで129、段階ごとの伸びは20（110/+18からさらに引き上げ） */
       if(d < 12) s.wp = (s.wp + 1) % s.path.length;
       else { s.x += dx/d * spd * dt; s.y += dy/d * spd * dt; }
     }
